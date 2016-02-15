@@ -331,54 +331,60 @@ static void reb_collision_resolve_hardsphere(struct reb_simulation* const r, str
 	if (vx21*x21 + vy21*y21 + vz21*z21 >0) return; // not approaching
 	// Bring the to balls in the xy plane.
 	// NOTE: this could probabely be an atan (which is faster than atan2)
-	double theta = atan2(z21,y21);
+	double theta = atan2(z21,y21);			// Angle in y-z plane
 	double stheta = sin(theta);
 	double ctheta = cos(theta);
-	double vy21n = ctheta * vy21 + stheta * vz21;	
-	double y21n = ctheta * y21 + stheta * z21;	
+	double vy21n = ctheta * vy21 + stheta * vz21;	// y-z plane velocity
+	double y21n = ctheta * y21 + stheta * z21;	// y-z plane r vector dotted with y-z plane r unit vector
 	
 	// Bring the two balls onto the positive x axis.
-	double phi = atan2(y21n,x21);
-	double cphi = cos(phi);
-	double sphi = sin(phi);
-	double vx21nn = cphi * vx21  + sphi * vy21n;		
+	double phi = atan2(y21n,x21);			// Angle in x-y plane between particle centres and axes
+	double cphi = cos(phi);				// Normal vector
+	double sphi = sin(phi);				
+	double vx21nn = cphi * vx21  + sphi * vy21n;	 // x-y plane velocity vector dotted with REBOUND normal vector (which is reverse of Richardson normal vector)	
+	double vx21t =  sphi * vx21 -  cphi * vy21n;     // NICK ADDED x-y plane velocity vector dotted with tangential vector (remembering REBOUND normal vector is reverse of Richardson normal vector)
 
 	// Coefficient of restitution
 	double eps= 1; // perfect bouncing by default 
 	if (r->coefficient_of_restitution){
-		eps = r->coefficient_of_restitution(r, vx21nn);
+		eps = r->coefficient_of_restitution(r, sqrt(vx21*vx21 + vy21*vy21 + vz21*vz21);		 // NICK EDITED to total velocity from normal velocity
 	}
-	double dvx2 = -(1.0+eps)*vx21nn;
+	double dvx2 = -(1.0+eps)*vx21nn;		// Delta v_n
+	double dvxt = -(1.0-eps)*vx21t;         	// NICK ADDED rebound delta v_t (assuming same restitution and beta = 1) from Eqn. 14 Richardson
 	double minr = (p1.r>p2.r)?p2.r:p1.r;
 	double maxr = (p1.r<p2.r)?p2.r:p1.r;
-	double mindv= minr*r->minimum_collision_velocity;
+	double mindv= minr*r->minimum_collision_velocity;	// Min collision velocity
 	double _r = sqrt(x21*x21 + y21*y21 + z21*z21);
 	mindv *= 1.-(_r - maxr)/minr;
 	if (mindv>maxr*r->minimum_collision_velocity)mindv = maxr*r->minimum_collision_velocity;
 	if (dvx2<mindv) dvx2 = mindv;
 	// Now we are rotating backwards
-	double dvx2n = cphi * dvx2;		
-	double dvy2n = sphi * dvx2;		
-	double dvy2nn = ctheta * dvy2n;	
+	double dvx2n = cphi * dvx2;			// x component of delta v_n
+	double dvx2t = sphi * dvxt;     		// NICK ADDED rotate new tangential component back
+	double dvy2n = sphi * dvx2;			// y component of delta v_n
+	double dvy2t = -cphi * dvxt;    		// NICK ADDED rotate new tangential component back
+	double dvy2nn = ctheta * dvy2n;
+	double dvy2tt = ctheta * dvy2t; 		// NICK ADDED rotate new tangential component back
 	double dvz2nn = stheta * dvy2n;	
+	double dvz2tt = stheta * dvy2t;        		// NICK ADDED rotate new tangential component back
 
 
 	// Applying the changes to the particles.
 #ifdef MPI
 	if (isloc==1){
 #endif // MPI
-	const double p2pf = p1.m/(p1.m+p2.m);
-	particles[c.p2].vx -=	p2pf*dvx2n;
-	particles[c.p2].vy -=	p2pf*dvy2nn;
-	particles[c.p2].vz -=	p2pf*dvz2nn;
+	const double p2pf = p1.m/(p1.m+p2.m);		// Mass ratio
+	particles[c.p2].vx -=	p2pf*(dvx2n+dvx2t);     // NICK EDITED Eqn. 14 from Richardson
+	particles[c.p2].vy -=	p2pf*(dvy2nn+dvy2tt);
+	particles[c.p2].vz -=	p2pf*(dvz2nn+dvz2tt);
 	particles[c.p2].lastcollision = r->t;
 #ifdef MPI
 	}
 #endif // MPI
-	const double p1pf = p2.m/(p1.m+p2.m);
-	particles[c.p1].vx +=	p1pf*dvx2n; 
-	particles[c.p1].vy +=	p1pf*dvy2nn; 
-	particles[c.p1].vz +=	p1pf*dvz2nn; 
+	const double p1pf = p2.m/(p1.m+p2.m);             // Mass ratio
+	particles[c.p1].vx +=	p1pf*(dvx2n+dvx2t);       // NICK EDITED Eqn. 14 from Richardson
+	particles[c.p1].vy +=	p1pf*(dvy2nn+dvy2tt);
+	particles[c.p1].vz +=	p1pf*(dvz2nn+dvz2tt);
 	particles[c.p1].lastcollision = r->t;
 		
 	// Return y-momentum change
